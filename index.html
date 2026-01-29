@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100;400&display=swap"
+      rel="stylesheet"
+    />
+
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EESQLBench · Leaderboard</title>
+  <link rel="icon" href="https://images.emojiterra.com/google/noto-emoji/unicode-15.1/color/svg/1f4ca.svg" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0/dist/css/bootstrap.min.css" />
+
+  <style>
+    body {
+      font-family: "JetBrains Mono", monospace;
+      background-color: #ffffff;
+      color: #000000;
+    }
+
+    .container-fluid {
+      margin-top: 6vh;
+      margin-bottom: 8vh;
+      max-width: 1100px;
+    }
+
+    .brand {
+      letter-spacing: 0.5px;
+    }
+
+    .muted {
+      color: rgba(0, 0, 0, 0.65);
+    }
+
+    .table thead th {
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .sort-indicator {
+      font-size: 0.9em;
+      opacity: 0.7;
+      margin-left: 6px;
+    }
+
+    @media screen and (max-width: 1400px) {
+      body {
+        font-size: 1.05rem;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container-fluid px-3">
+    <!-- Header -->
+    <div class="d-flex flex-column align-items-center gap-3 text-center">
+      <img src="logo.png" alt="EESQLBench Logo" style="max-width: 300px; width: 70%; margin-bottom: 10px;" />
+      <h1 class="brand mb-0"><b>EESQLBench</b> Leaderboard</h1>
+      <p class="lead mb-1 muted">
+        Efficiency-Oriented Text-to-SQL Benchmark · Metrics: EX, CR, AR@k
+      </p>
+
+      <div class="d-flex gap-3 flex-wrap justify-content-center">
+        <a href="#">← Back to Home</a>
+        <a href="#">Paper</a>
+        <a href="https://pan.quark.cn/s/6d5a27008163?pwd=dRUu">Dataset</a>
+      </div>
+    </div>
+
+    <hr class="my-4" />
+
+    <!-- Controls -->
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-md-5">
+        <label for="searchInput" class="form-label">Search</label>
+        <input id="searchInput" class="form-control" placeholder="(Base) Model / Notes..." />
+      </div>
+
+      <div class="col-12 col-md-4">
+        <label for="trackSelect" class="form-label">Track</label>
+        <select id="trackSelect" class="form-select">
+          <option value="overall" selected>Overall</option>
+          <option value="simple">Simple</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </div>
+
+      <div class="col-12 col-md-3">
+        <label for="metricSelect" class="form-label">Primary Metric</label>
+        <select id="metricSelect" class="form-select">
+          <option value="AR@1" selected>AR@1 ↑</option>
+          <option value="AR@0.8">AR@0.8 ↑</option>
+          <option value="CR">CR ↑</option>
+          <option value="EX">EX ↑</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Leaderboard -->
+    <div class="table-responsive mt-4">
+      <table class="table table-hover align-middle">
+        <thead class="table-light">
+          <tr>
+            <th data-key="rank">Rank</th>
+            <th data-key="model">Model</th>
+            <th data-key="basemodel">Base Model</th>
+            <th data-key="EX">EX ↑ <span class="sort-indicator" id="sEX"></span></th>
+            <th data-key="CR">CR ↑ <span class="sort-indicator" id="sCR"></span></th>
+            <th data-key="AR@0.8">AR@0.8 ↑ <span class="sort-indicator" id="sAR08"></span></th>
+            <th data-key="AR@1">AR@1 ↑ <span class="sort-indicator" id="sAR1"></span></th>
+            <th data-key="VES">VES ↑ <span class="sort-indicator" id="sVES"></span></th>
+            <th data-key="date">Date</th>
+            <th data-key="notes">Notes</th>
+          </tr>
+        </thead>
+        <tbody id="leaderboardBody"></tbody>
+      </table>
+    </div>
+
+    <p class="muted mt-2 mb-0">
+      Notes: Higher is better for EX / CR / AR@k.
+      Click table headers to sort.
+    </p>
+  </div>
+
+  <script>
+    let RESULTS = [];
+
+    // --- Utilities ---
+    const fmtPct = (x) => (typeof x === "number" ? (x * 100).toFixed(1) + "%" : "-");
+    const fmtCR = (x) => (typeof x === "number" ? x.toFixed(2) : "-");
+    const fmtAR = (x) => (typeof x === "number" ? x.toFixed(1) + "%": "-");
+
+    const state = {
+      track: "overall",
+      query: "",
+      sortKey: "AR@1",
+      sortDir: "desc", // 'asc' | 'desc'
+      primaryMetric: "AR@1",
+    };
+
+    const headerToIndicatorId = {
+      EX: "sEX",
+      CR: "sCR",
+      "AR@0.8": "sAR08",
+      "AR@1": "sAR1",
+      VES: "sVES"
+    };
+
+    // -- LOAD DATA -- 
+    fetch('./data.json')
+      .then(response => {
+        if (!response.ok) throw new Error('网络响应错误');
+        return response.json();
+      })
+      .then(json_data => {
+        RESULTS = json_data["datas"];
+        render();
+      })
+      .catch(error => {
+        console.error("Fetch 操作出现问题:", error);
+      });
+
+    function setIndicators() {
+      Object.values(headerToIndicatorId).forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = "";
+      });
+      if (headerToIndicatorId[state.sortKey]) {
+        const el = document.getElementById(headerToIndicatorId[state.sortKey]);
+        if (el) el.textContent = state.sortDir === "asc" ? "▲" : "▼";
+      }
+    }
+
+    function compare(a, b, key, dir) {
+      const av = a[key];
+      const bv = b[key];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+
+      let res = 0;
+      if (typeof av === "number" && typeof bv === "number") {
+        res = av - bv;
+      } else {
+        res = String(av).localeCompare(String(bv));
+      }
+      return dir === "asc" ? res : -res;
+    }
+
+    function getFilteredRows() {
+      const q = state.query.trim().toLowerCase();
+      return RESULTS
+        .filter((r) => r.track === state.track)
+        .filter((r) => {
+          if (!q) return true;
+          return (
+            (r.model || "").toLowerCase().includes(q) ||
+            (r.basemodel || "").toLowerCase().includes(q) ||
+            (r.notes || "").toLowerCase().includes(q) ||
+            (r.ves || "").toLowerCase().includes(q) ||
+            (r.date || "").toLowerCase().includes(q)
+          );
+        });
+    }
+
+    function getSortedRows(rows) {
+      const key = state.sortKey;
+      const dir = state.sortDir;
+      const sorted = [...rows].sort((a, b) => compare(a, b, key, dir));
+
+      sorted.sort((a, b) => {
+        const primary = compare(a, b, key, dir);
+        if (primary !== 0) return primary;
+        const t1 = compare(a, b, "EX", "desc");
+        if (t1 !== 0) return t1;
+        return compare(a, b, "model", "asc");
+      });
+      return sorted;
+    }
+
+    function render() {
+      const body = document.getElementById("leaderboardBody");
+      if (!body) return;
+      body.innerHTML = "";
+
+      const rows = getSortedRows(getFilteredRows());
+
+      rows.forEach((r, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td><b>${idx + 1}</b></td>
+            <td>${r.model || "-"}</td>
+            <td>${r.basemodel || "-"}</td>
+            <td>${fmtPct(r.EX)}</td>
+            <td>${fmtCR(r.CR)}</td>
+            <td>${fmtAR(r["AR@0.8"])}</td>
+            <td>${fmtAR(r["AR@1"])}</td>
+            <td>${fmtCR(r["VES"])}</td>
+            <td>${r.date || "-"}</td>
+            <td class="muted">${r.notes || "-"}</td>
+        `;
+        body.appendChild(tr);
+      });
+      setIndicators();
+    }
+
+    // --- Events Listeners ---
+    document.getElementById("searchInput")?.addEventListener("input", (e) => {
+      state.query = e.target.value;
+      render();
+    });
+
+    document.getElementById("trackSelect")?.addEventListener("change", (e) => {
+      state.track = e.target.value;
+      render();
+    });
+
+    document.getElementById("metricSelect")?.addEventListener("change", (e) => {
+      state.primaryMetric = e.target.value;
+      state.sortKey = state.primaryMetric;
+      if (state.sortKey === "CR") state.sortDir = "asc";
+      else state.sortDir = "desc";
+      render();
+    });
+
+    document.querySelectorAll("thead th[data-key]").forEach((th) => {
+      th.addEventListener("click", () => {
+        const key = th.getAttribute("data-key");
+        if (!key || key === "rank") return;
+
+        if (state.sortKey === key) {
+          state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+        } else {
+          state.sortKey = key;
+          if (key === "CR") state.sortDir = "asc";
+          else state.sortDir = "desc";
+        }
+        render();
+      });
+    });
+  </script>
+</body>
+
+</html>
